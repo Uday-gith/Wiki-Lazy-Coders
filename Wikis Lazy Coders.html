@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wikis Lazy Coders</title>
+<style>
+:root{
+  box-sizing:border-box;
+  --dove:#b9c8d9; --ink:#17283a; --soft:#3c5069; --link:#123a6b;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+:root[data-theme="dark"]{ --dove:#5f7590; --ink:#f3f7fb; --soft:#dbe5f0; --link:#ffffff; }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --dove:#5f7590; --ink:#f3f7fb; --soft:#dbe5f0; --link:#ffffff; }
+}
+html{ height:100%; scroll-padding-top:env(safe-area-inset-top,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+body{
+  margin:0; height:100%; display:flex; flex-direction:column;
+  background:var(--dove); color:var(--ink);
+  font:16px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+header{ display:flex; align-items:center; gap:.75rem; padding:1rem clamp(1rem,4vw,2.5rem) 0; }
+header svg{ flex:none; width:38px; height:38px; }
+h1{ margin:0; font:400 clamp(1.4rem,3.4vw,2rem)/1.15 "Linux Libertine","Georgia","Times New Roman",serif; letter-spacing:.01em; }
+.sub{ margin:0; font-size:.9rem; color:var(--soft); }
+main{ flex:1; min-height:0; position:relative; }
+canvas{ display:block; width:100%; height:100%; }
+.hint{ margin:0; padding:0 1rem .75rem; text-align:center; font-size:.95rem; color:var(--soft); font-style:italic; min-height:1.6em; }
+footer{ padding:.75rem clamp(1rem,4vw,2.5rem) 1rem; font-size:.85rem; color:var(--soft); border-top:1px solid color-mix(in srgb,var(--ink) 20%,transparent); display:flex; flex-wrap:wrap; gap:.25rem 1.25rem; justify-content:space-between; }
+footer p{ margin:0; }
+a{ color:var(--link); text-underline-offset:3px; }
+a:focus-visible{ outline:3px solid var(--link); outline-offset:3px; border-radius:2px; }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="#a88763"/><ellipse cx="20" cy="22" rx="13" ry="10" fill="#e6d3b3"/><ellipse cx="13.5" cy="19" rx="4.5" ry="3" fill="#5b4331" transform="rotate(-23 13.5 19)"/><ellipse cx="26.5" cy="19" rx="4.5" ry="3" fill="#5b4331" transform="rotate(23 26.5 19)"/><circle cx="13.5" cy="19" r="1.4" fill="#1c1410"/><circle cx="26.5" cy="19" r="1.4" fill="#1c1410"/><ellipse cx="20" cy="25" rx="2.4" ry="1.6" fill="#3a2a20"/></svg>
+  <div>
+    <h1>Wikis Lazy Coders</h1>
+    <p class="sub">The Wiki's Lazy Coders is a passionate volunteer community focused on developing lightweight software, webpages, tools, and analysis scripts to streamline work within the Wikipedia and broader Wikimedia ecosystem.</p>
+  </div>
+</header>
+
+<main>
+  <canvas id="sloth" role="img" aria-label="A felted sloth on a dove-blue background. It slowly turns to watch your cursor, and wanders on its own when you stop moving."></canvas>
+</main>
+
+<p class="hint" id="hint" aria-live="polite"></p>
+
+<footer>
+  <p>Made by and for the Wikimedia community.</p>
+  <p><a href="https://meta.wikimedia.org/wiki/Wikis_Lazy_Coders">Wikis Lazy Coders on Meta-Wiki</a></p>
+</footer>
+
+<script>
+(() => {
+  const TAU = Math.PI * 2, COLS = 10, ROWS = 5, IDLE_MS = 9000;   // 10 x 5 = 50 frames
+  const rmQuery = matchMedia('(prefers-reduced-motion: reduce)');
+  const touchOnly = matchMedia('(hover: none)').matches;
+  const canvas = document.getElementById('sloth');
+  const ctx = canvas.getContext('2d');
+  const hint = document.getElementById('hint');
+
+  const C = { brown:'#8b6d4d', brown2:'#7a5e42', head:'#a88763', cream:'#e6d3b3', dark:'#5b4331', claw:'#f1e6cf' };
+  const TEXT = {
+    watching: 'Move your cursor. He’s watching. Stop for 9 seconds and he gets bored.',
+    bored: 'He got bored and is wandering on his own. Move your cursor to get his attention.',
+    touch: 'He’s taking a slow look around. Try a device with a cursor to be watched.'
+  };
+
+  let W = 0, H = 0, S = 1, dpr = 1, pattern = null;
+  const cur = { x: 0, y: 0 }, tgt = { x: 0, y: 0 }, drift = { x: 0, tx: 0 };
+  let latest = { i: 0, x: 0, y: 0 };
+  let idle = false, idleTimer = 0, reactTimer = 0, wanderAt = 0, lastPt = null;
+  let blinkAt = 2500, blinkStart = -1, prev = performance.now();
+  const rm = () => rmQuery.matches;
+  const amp = () => (rm() ? 0.3 : 1);
+
+  /* ---------- setup ---------- */
+  function makeFeltPattern() {
+    const c = document.createElement('canvas'); c.width = c.height = 96;
+    const p = c.getContext('2d'), img = p.createImageData(96, 96);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const light = Math.random() < 0.5, v = light ? 255 : 30;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = Math.random() * 34;
+    }
+    p.putImageData(img, 0, 0);
+    for (let i = 0; i < 90; i++) {                       // little wool fibres
+      p.strokeStyle = Math.random() < 0.5 ? 'rgba(255,255,255,.16)' : 'rgba(30,20,10,.14)';
+      p.lineWidth = 1; p.beginPath();
+      const x = Math.random() * 96, y = Math.random() * 96, a = Math.random() * TAU;
+      p.moveTo(x, y); p.lineTo(x + Math.cos(a) * 6, y + Math.sin(a) * 6); p.stroke();
+    }
+    return ctx.createPattern(c, 'repeat');
+  }
+
+  function initCanvas() {
+    const resize = () => {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const r = canvas.getBoundingClientRect();
+      W = r.width; H = r.height;
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+      S = Math.min(W / 400, H / 480, 1.7);
+    };
+    resize();
+    pattern = makeFeltPattern();
+    new ResizeObserver(resize).observe(canvas);
+  }
+
+  /* ---------- input ---------- */
+  function frameOf(px, py) {                              // pointer -> one of 50 frames
+    const r = canvas.getBoundingClientRect();
+    const nx = Math.min(0.999, Math.max(0, (px - r.left) / r.width));
+    const ny = Math.min(0.999, Math.max(0, (py - r.top) / r.height));
+    const col = Math.floor(nx * COLS), row = Math.floor(ny * ROWS);
+    return { i: row * COLS + col, x: ((col + 0.5) / COLS) * 2 - 1, y: ((row + 0.5) / ROWS) * 2 - 1 };
+  }
+
+  function trackPointer(e) {
+    if (touchOnly || e.pointerType === 'touch') return;
+    if (lastPt && Math.hypot(e.clientX - lastPt.x, e.clientY - lastPt.y) < 6) return;
+    lastPt = { x: e.clientX, y: e.clientY };
+    resetIdleTimer();
+    updateSlothTarget(e.clientX, e.clientY);
+  }
+
+  function updateSlothTarget(px, py) {
+    latest = frameOf(px, py);
+    if (reactTimer) return;                               // he is still "thinking" about the last move
+    reactTimer = setTimeout(() => {                       // sleepy reaction delay
+      reactTimer = 0;
+      tgt.x = latest.x * amp(); tgt.y = latest.y * amp();
+    }, rm() ? 900 : 250 + Math.random() * 550);
+  }
+
+  /* ---------- idle ---------- */
+  function resetIdleTimer() {
+    if (touchOnly) return;
+    clearTimeout(idleTimer);
+    if (idle) exitIdleMode();
+    idleTimer = setTimeout(enterIdleMode, IDLE_MS);
+  }
+
+  function pickWander(now) {
+    tgt.x = (Math.random() * 1.7 - 0.85) * amp();
+    tgt.y = (Math.random() * 1.2 - 0.6) * amp();
+    drift.tx = rm() ? 0 : (Math.random() * 2 - 1) * 40;
+    wanderAt = now + 3500 + Math.random() * 4500;
+  }
+
+  function enterIdleMode() {
+    idle = true;
+    hint.textContent = touchOnly ? TEXT.touch : TEXT.bored;
+    pickWander(performance.now());
+  }
+
+  function exitIdleMode() {
+    idle = false;
+    drift.tx = 0;
+    hint.textContent = TEXT.watching;
+  }
+
+  /* ---------- drawing ---------- */
+  function ell(x, y, rx, ry, rot, color, stitch = true) {
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot || 0, 0, TAU);
+    ctx.save();
+    ctx.shadowColor = 'rgba(40,55,85,.3)'; ctx.shadowBlur = 10 * S * dpr; ctx.shadowOffsetY = 4 * S * dpr;
+    ctx.fillStyle = color; ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = pattern; ctx.fill();                  // felt grain
+    if (stitch) {
+      ctx.beginPath(); ctx.ellipse(x, y, rx - 6, ry - 6, rot || 0, 0, TAU);
+      ctx.setLineDash([5, 6]); ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(255,244,225,.5)';
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+
+  function claws(x, y, rot, ry) {
+    const ex = x - Math.sin(rot) * ry, ey = y + Math.cos(rot) * ry;
+    for (const k of [-1, 0, 1]) ell(ex + Math.cos(rot) * k * 11, ey + Math.sin(rot) * k * 11 - 2, 5, 14, rot + k * 0.15, C.claw, false);
+  }
+
+  function drawSloth(now, lidAmt, yawn) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.translate(W / 2, H / 2 - 52 * S); ctx.scale(S, S);
+    const breath = rm() ? 0 : Math.sin(now / 1700) * 3;
+    const bx = cur.x * 7 + drift.x, sway = cur.x * 0.05;
+
+    ctx.fillStyle = 'rgba(35,50,80,.16)';
+    ctx.beginPath(); ctx.ellipse(bx * 0.5, 264, 170, 20, 0, 0, TAU); ctx.fill();
+
+    for (const s of [-1, 1]) claws(bx + s * 118, 140, -s * (0.16 + sway), 100);
+    ell(bx, 120 + breath * 0.4, 128, 138, 0, C.brown);
+    ell(bx + cur.x * 3, 146 + breath * 0.4, 80, 92, 0, C.cream);
+    ctx.font = 'bold 34px "Courier New",monospace'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(110,80,52,.6)';
+    ctx.fillText('</>', bx + cur.x * 3, 158 + breath * 0.4);
+    for (const s of [-1, 1]) ell(bx + s * 72, 246, 46, 26, 0, C.brown2);
+    for (const s of [-1, 1]) ell(bx + s * 118, 140, 28, 100, -s * (0.16 + sway), C.brown2);
+
+    ctx.save();                                           // head
+    ctx.translate(bx + cur.x * 22, -70 + cur.y * 12 + breath);
+    ctx.rotate(cur.x * 0.07);
+    for (const s of [-1, 1]) ell(s * 98, -6, 18, 22, 0, C.brown2);
+    ell(0, 0, 108, 92, 0, C.head);
+    const fx = cur.x * 15, fy = cur.y * 8;
+    ell(fx, 8 + fy, 84, 64, 0, C.cream);
+    for (const s of [-1, 1]) {
+      ell(fx + s * 36, fy - 2, 25, 17, s * 0.4, C.dark, false);
+      const ex = fx + s * 34 + cur.x * 5, ey = fy - 2 + cur.y * 3.5;
+      ell(ex, ey, 8, 8, 0, '#1c1410', false);
+      ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(ex - 2.5, ey - 2.5, 2, 0, TAU); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.arc(ex, ey, 8.6, 0, TAU); ctx.clip();
+      ctx.fillStyle = C.dark; ctx.fillRect(ex - 10, ey - 10, 20, 20 * lidAmt);   // heavy eyelid
+      ctx.restore();
+    }
+    ell(fx * 1.1, fy + 22, 12, 8, 0, '#3a2a20', false);
+    ctx.strokeStyle = '#3a2a20'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(fx - 14, fy + 36); ctx.quadraticCurveTo(fx, fy + 46 + yawn * 8, fx + 14, fy + 36); ctx.stroke();
+    if (yawn > 0.15) ell(fx, fy + 44, 9, yawn * 12, 0, '#5a2f2a', false);
+    ctx.restore();
+  }
+
+  /* ---------- loop ---------- */
+  function animateSloth(now) {
+    const dt = Math.min(64, now - prev); prev = now;
+    const slow = rm() ? 3.5 : 1, tc = (idle ? 1800 : 900) * slow;
+    if (idle && now >= wanderAt) pickWander(now);
+    const a = 1 - Math.exp(-dt / tc);
+    cur.x += (tgt.x - cur.x) * a; cur.y += (tgt.y - cur.y) * a;
+    drift.x += (drift.tx - drift.x) * (1 - Math.exp(-dt / (tc * 1.8)));
+
+    const base = idle ? 0.62 : 0.42;                      // bored = sleepier
+    let lid = base;
+    if (blinkStart < 0 && now > blinkAt) blinkStart = now;
+    if (blinkStart >= 0) {
+      const p = (now - blinkStart) / 420;
+      if (p >= 1) { blinkStart = -1; blinkAt = now + 2500 + Math.random() * 4000; }
+      else lid = base + (1 - base) * Math.sin(p * Math.PI);
+    }
+    const yawn = idle && !rm() ? Math.pow(Math.max(0, Math.sin(now / 4300)), 14) : 0;
+    drawSloth(now, lid, yawn);
+    requestAnimationFrame(animateSloth);
+  }
+
+  /* ---------- go ---------- */
+  initCanvas();
+  hint.textContent = TEXT.watching;
+  if (touchOnly) enterIdleMode();                         // touch: gentle automatic animation
+  else { window.addEventListener('pointermove', trackPointer, { passive: true }); resetIdleTimer(); }
+  requestAnimationFrame(animateSloth);
+})();
+</script>
+</body>
+</html>
